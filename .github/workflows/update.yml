@@ -7,32 +7,92 @@ on:
         description: "Published Halro tag, for example v0.7.1"
         required: true
         type: string
+      commit:
+        description: "Full commit SHA selected by the published tag"
+        required: true
+        type: string
   repository_dispatch:
     types: [halro-release-published]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   update:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ inputs.version || github.event.client_payload.version }}
-      GH_TOKEN: ${{ github.token }}
+      EXPECTED_COMMIT: ${{ inputs.commit || github.event.client_payload.commit }}
     steps:
+      - name: Create a token whose pull request can trigger tap CI
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.HALRO_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HALRO_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
       - name: Validate the released version
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          set -euo pipefail
           if ! printf '%s' "${VERSION}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'; then
             echo "invalid version: ${VERSION}" >&2
             exit 2
           fi
+          if ! printf '%s' "${EXPECTED_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "invalid release commit: ${EXPECTED_COMMIT}" >&2
+            exit 2
+          fi
+          actual_commit=$(gh api "repos/akz142857/Halro/commits/${VERSION}" --jq .sha)
+          if [ "${actual_commit}" != "${EXPECTED_COMMIT}" ]; then
+            echo "tag ${VERSION} resolves to ${actual_commit}, not ${EXPECTED_COMMIT}" >&2
+            exit 1
+          fi
       - name: Download the signed release checksum manifest
-        run: gh release download "${VERSION}" --repo akz142857/Halro --pattern checksums.txt
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release download "${VERSION}" --repo akz142857/Halro \
+            --pattern 'checksums.txt*' \
+            --pattern 'halro-darwin-*.tar.gz*' \
+            --pattern 'halro-linux-*.tar.gz*'
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify checksums, provenance, and keyless signatures
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          cosign verify-blob \
+            --certificate-identity "https://github.com/akz142857/Halro/.github/workflows/release.yml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --bundle checksums.txt.sigstore.json checksums.txt
+          sha256sum --check --ignore-missing checksums.txt
+          for target in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            test -f "halro-${target}.tar.gz"
+            test -f "halro-${target}.tar.gz.sigstore.json"
+          done
+          for archive in halro-darwin-*.tar.gz halro-linux-*.tar.gz; do
+            gh attestation verify "${archive}" --repo akz142857/Halro \
+              --source-digest "${EXPECTED_COMMIT}" \
+              --source-ref refs/heads/main \
+              --cert-identity "https://github.com/akz142857/Halro/.github/workflows/release.yml@refs/heads/main"
+            cosign verify-blob \
+              --certificate-identity "https://github.com/akz142857/Halro/.github/workflows/release.yml@refs/heads/main" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              --bundle "${archive}.sigstore.json" "${archive}"
+          done
       - name: Update Formula URLs and checksums
         run: ruby scripts/update-formula.rb "${VERSION}" checksums.txt Formula/halro.rb
       - name: Open or update the Formula pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           if git diff --quiet -- Formula/halro.rb; then
@@ -46,7 +106,11 @@ jobs:
           git add Formula/halro.rb
           git commit -m "halro ${VERSION#v}"
           git push --force-with-lease origin "${branch}"
+          gh label create automated-release \
+            --description "Verified package-manager release automation" \
+            --color 1d76db --force
           gh pr view "${branch}" >/dev/null 2>&1 || \
             gh pr create --base main --head "${branch}" \
               --title "halro ${VERSION#v}" \
-              --body "Update the Formula from the immutable Halro ${VERSION} Release. Merge only after the full tap CI passes."
+              --label automated-release \
+              --body "Update the Formula from the immutable Halro ${VERSION} Release at ${EXPECTED_COMMIT}. This PR is merged only after the full tap CI passes."
