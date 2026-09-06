@@ -23,6 +23,9 @@ class WorkflowContractTest < Minitest::Test
   def test_auto_merge_is_narrowed_to_successful_package_prs
     workflow = File.read(File.join(ROOT, ".github/workflows/auto-merge.yml"))
     assert_includes workflow, "workflow_run.conclusion == 'success'"
+    assert_includes workflow, "workflow_run.event == 'pull_request'"
+    assert_includes workflow, "workflow_run.head_repository.full_name == github.repository"
+    assert_includes workflow, "startsWith(github.event.workflow_run.head_branch, 'package/v')"
     assert_includes workflow, "^package/v"
     assert_includes workflow, 'any(.name == "automated-release")'
     assert_includes workflow, "headRepositoryOwner"
