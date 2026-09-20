@@ -5,21 +5,21 @@ class Halro < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/akz142857/Halro/releases/download/v0.8.4/halro-darwin-arm64.tar.gz"
-      sha256 "e82f0e129046beea97984e20a6d7ed6c799b553d5a1298ce043f6b0568543a90"
+      url "https://github.com/akz142857/Halro/releases/download/v0.8.5/halro-darwin-arm64.tar.gz"
+      sha256 "c9198536c20f02d5d57093e658d4641c26b2bedecce2ad908558b9dfe158b950"
     else
-      url "https://github.com/akz142857/Halro/releases/download/v0.8.4/halro-darwin-amd64.tar.gz"
-      sha256 "d0b2558f5872dd27967054099855029aa7668133c4d4e438715d1e3b107471f4"
+      url "https://github.com/akz142857/Halro/releases/download/v0.8.5/halro-darwin-amd64.tar.gz"
+      sha256 "e341b036b048db0277fd5c9f8370ef1cbb92b445c89a55a484a4ed425c5bf673"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/akz142857/Halro/releases/download/v0.8.4/halro-linux-arm64.tar.gz"
-      sha256 "8f777e63e8378064dbbfbdf14863a09c560d398f9424cec50305d9f0269880f0"
+      url "https://github.com/akz142857/Halro/releases/download/v0.8.5/halro-linux-arm64.tar.gz"
+      sha256 "39629fbd30129eaca4e49309efa2506abf281463576575f4f33b7fb55a24e037"
     else
-      url "https://github.com/akz142857/Halro/releases/download/v0.8.4/halro-linux-amd64.tar.gz"
-      sha256 "3ecda594aa61a108ea68a12df4976244e25ee250f679a88f691db097bc835b5c"
+      url "https://github.com/akz142857/Halro/releases/download/v0.8.5/halro-linux-amd64.tar.gz"
+      sha256 "668ad91ca27c60557c95a9b4eec1838354c5134ab875cce6333088bb964e0814"
     end
   end
 
