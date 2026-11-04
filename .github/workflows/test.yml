@@ -17,6 +17,8 @@ jobs:
       - run: ruby scripts/test-workflow-contract.rb
 
   formula:
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +26,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Set up Homebrew on Linux
         if: runner.os == 'Linux'
         uses: Homebrew/actions/setup-homebrew@3cdb78d0f62ad29dd32de765782654f4eedea607 # 2026.08.31.1
@@ -38,3 +42,23 @@ jobs:
       - run: brew install halro-ai/tap/halro
       - run: brew test halro-ai/tap/halro
       - run: halro version
+      - name: Reinstall the published v0.11.0 formula
+        run: |
+          set -euo pipefail
+          brew reinstall halro-ai/tap/halro
+          brew test halro-ai/tap/halro
+          halro version >reinstalled-version.json
+          grep -F 'v0.11.0' reinstalled-version.json
+      - name: Upgrade the published v0.10.1 formula to v0.11.0
+        run: |
+          set -euo pipefail
+          brew uninstall halro-ai/tap/halro
+          git show 418312e0cb6dd10d9e865a53e144e1b5338ecd3c:Formula/halro.rb >Formula/halro.rb
+          brew install halro-ai/tap/halro
+          halro version >previous-version.json
+          grep -F 'v0.10.1' previous-version.json
+          git checkout HEAD -- Formula/halro.rb
+          brew upgrade --formula halro-ai/tap/halro
+          brew test halro-ai/tap/halro
+          halro version >upgraded-version.json
+          grep -F 'v0.11.0' upgraded-version.json
