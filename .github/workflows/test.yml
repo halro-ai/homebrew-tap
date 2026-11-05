@@ -17,13 +17,18 @@ jobs:
       - run: ruby scripts/test-workflow-contract.rb
 
   formula:
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04]
+        os: [macos-14, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Set up Homebrew on Linux
         if: runner.os == 'Linux'
         uses: Homebrew/actions/setup-homebrew@3cdb78d0f62ad29dd32de765782654f4eedea607 # 2026.08.31.1
@@ -33,8 +38,66 @@ jobs:
           tap_root="$(brew --repository)/Library/Taps/halro-ai"
           mkdir -p "${tap_root}"
           ln -s "${GITHUB_WORKSPACE}" "${tap_root}/homebrew-tap"
+      - name: Prepare isolated operator-state preservation fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/halro-operator-state/data"
+          cd "${RUNNER_TEMP}/halro-operator-state"
+          printf '%s\n' '# Synthetic fixture; never used to start Halro.' 'data_dir: ./data' 'master_key_file: ./master.key' >config.yaml
+          printf '%s\n' 'synthetic-data-preservation-fixture' >data/sentinel
+          printf '%s\n' 'synthetic-not-a-production-key' >master.key
+          shasum -a 256 config.yaml data/sentinel master.key >"${RUNNER_TEMP}/halro-state.sha256"
       - run: brew style halro-ai/tap/halro
       - run: brew audit --strict --formula halro-ai/tap/halro
       - run: brew install halro-ai/tap/halro
+        working-directory: ${{ runner.temp }}/halro-operator-state
       - run: brew test halro-ai/tap/halro
-      - run: halro version
+        working-directory: ${{ runner.temp }}/halro-operator-state
+      - name: Verify clean v0.12.2 install and untouched operator state
+        working-directory: ${{ runner.temp }}/halro-operator-state
+        run: |
+          set -euo pipefail
+          halro version >installed-version.json
+          cat installed-version.json
+          ruby -rjson -e 'v = JSON.parse(File.read(ARGV[0])); abort "wrong release" unless v.dig("build", "version") == "v0.12.2" && v.dig("build", "commit") == "f2a342568113062c0abb855857768fd133adc206"' installed-version.json
+          shasum -a 256 -c "${RUNNER_TEMP}/halro-state.sha256"
+          if pgrep -x halro || pgrep -x halro-deadman; then
+            echo "unexpected automatic Halro process" >&2
+            exit 1
+          fi
+      - name: Reinstall v0.12.2 and preserve operator state
+        working-directory: ${{ runner.temp }}/halro-operator-state
+        run: |
+          set -euo pipefail
+          brew reinstall halro-ai/tap/halro
+          brew test halro-ai/tap/halro
+          halro version >reinstalled-version.json
+          cat reinstalled-version.json
+          ruby -rjson -e 'v = JSON.parse(File.read(ARGV[0])); abort "wrong release" unless v.dig("build", "version") == "v0.12.2" && v.dig("build", "commit") == "f2a342568113062c0abb855857768fd133adc206"' reinstalled-version.json
+          shasum -a 256 -c "${RUNNER_TEMP}/halro-state.sha256"
+          if pgrep -x halro || pgrep -x halro-deadman; then
+            echo "unexpected automatic Halro process" >&2
+            exit 1
+          fi
+      - name: Upgrade v0.12.1 to v0.12.2 and preserve operator state
+        working-directory: ${{ runner.temp }}/halro-operator-state
+        run: |
+          set -euo pipefail
+          brew uninstall --force halro-ai/tap/halro
+          shasum -a 256 -c "${RUNNER_TEMP}/halro-state.sha256"
+          git -C "${GITHUB_WORKSPACE}" show 3fb07fbfb001c274f4c9b88fda36072653301760:Formula/halro.rb >"${GITHUB_WORKSPACE}/Formula/halro.rb"
+          brew install halro-ai/tap/halro
+          halro version >previous-version.json
+          cat previous-version.json
+          ruby -rjson -e 'abort "wrong upgrade baseline" unless JSON.parse(File.read(ARGV[0])).dig("build", "version") == "v0.12.1"' previous-version.json
+          git -C "${GITHUB_WORKSPACE}" checkout HEAD -- Formula/halro.rb
+          brew upgrade --formula halro-ai/tap/halro
+          brew test halro-ai/tap/halro
+          halro version >upgraded-version.json
+          cat upgraded-version.json
+          ruby -rjson -e 'v = JSON.parse(File.read(ARGV[0])); abort "wrong release" unless v.dig("build", "version") == "v0.12.2" && v.dig("build", "commit") == "f2a342568113062c0abb855857768fd133adc206"' upgraded-version.json
+          shasum -a 256 -c "${RUNNER_TEMP}/halro-state.sha256"
+          if pgrep -x halro || pgrep -x halro-deadman; then
+            echo "unexpected automatic Halro process" >&2
+            exit 1
+          fi
