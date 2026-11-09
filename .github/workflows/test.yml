@@ -33,6 +33,11 @@ jobs:
           tap_root="$(brew --repository)/Library/Taps/halro-ai"
           mkdir -p "${tap_root}"
           ln -s "${GITHUB_WORKSPACE}" "${tap_root}/homebrew-tap"
+      - name: Trust only the formula under test when supported
+        run: |
+          if brew command trust >/dev/null 2>&1; then
+            brew trust --formula halro-ai/tap/halro
+          fi
       - run: brew style halro-ai/tap/halro
       - run: brew audit --strict --formula halro-ai/tap/halro
       - run: brew install halro-ai/tap/halro
